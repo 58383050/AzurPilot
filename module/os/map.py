@@ -1214,45 +1214,51 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
                 in_map_timer.clear()
                 continue
 
-    def os_auto_search_run(self, drop=None, strategic=False, interrupt=None):
+    def os_auto_search_run(self, drop=None, strategic=False, interrupt=None, *, siren_resource=False):
         """
         Args:
             drop (DropRecord): 掉落记录对象。
             strategic (bool): 是否使用战略搜索。
             interrupt (callable): 中断回调函数。
+            siren_resource (bool): 资源探测后的拾取搜索，开启自律按 0.5 秒重试。
 
         Returns:
             int: 完成的战斗次数。
         """
-        finished_combat = 0
-        for _ in range(5):
-            backup = self.config.temporary(Campaign_UseAutoSearch=True)
-            try:
-                if strategic:
-                    self.strategic_search_start(skip_first_screenshot=True)
-                combat = self.os_auto_search_daemon(
-                    drop=drop, strategic=strategic, interrupt=interrupt
-                )
-                finished_combat += combat
-            except CampaignEnd:
-                logger.info("[大世界-搜索] 大世界自动搜索完成")
-            finally:
-                backup.recover()
+        previous_resource = getattr(self, '_os_auto_search_siren_resource', False)
+        self._os_auto_search_siren_resource = siren_resource
+        try:
+            finished_combat = 0
+            for _ in range(5):
+                backup = self.config.temporary(Campaign_UseAutoSearch=True)
+                try:
+                    if strategic:
+                        self.strategic_search_start(skip_first_screenshot=True)
+                    combat = self.os_auto_search_daemon(
+                        drop=drop, strategic=strategic, interrupt=interrupt
+                    )
+                    finished_combat += combat
+                except CampaignEnd:
+                    logger.info("[大世界-搜索] 大世界自动搜索完成")
+                finally:
+                    backup.recover()
 
-            # 如果自动搜索被余烬弹窗中断则继续
-            # 海域清理完毕则退出
-            if self.config.is_task_enabled("OpsiAshBeacon"):
-                if self.handle_ash_beacon_attack() or self.ash_popup_canceled:
-                    strategic = False
+                # 如果自动搜索被余烬弹窗中断则继续
+                # 海域清理完毕则退出
+                if self.config.is_task_enabled("OpsiAshBeacon"):
+                    if self.handle_ash_beacon_attack() or self.ash_popup_canceled:
+                        strategic = False
+                        continue
+                    break
+                if self.info_bar_count() >= 2:
+                    break
+                if self.ash_popup_canceled:
                     continue
                 break
-            if self.info_bar_count() >= 2:
-                break
-            if self.ash_popup_canceled:
-                continue
-            break
-
-        return finished_combat
+            return finished_combat
+        finally:
+            # 资源拾取结束或异常后恢复，不能让后续普通战斗沿用快速重试。
+            self._os_auto_search_siren_resource = previous_resource
 
     @property
     def _is_siren_research_enabled(self):
@@ -1428,7 +1434,7 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
                     logger.info("[大世界] [装置处理] 检测到资源模式，执行标准处理")
                     # 执行一次自律寻敌
                     logger.info("[大世界] [装置处理] 执行自律寻敌")
-                    self.os_auto_search_run(drop=drop)
+                    self.os_auto_search_run(drop=drop, siren_resource=True)
 
                 # 塞壬信息收集装置 / 探测装置产物柱子：点中间已主动点击完成，无需自律
                 elif siren_mode == "collected":
@@ -1814,7 +1820,7 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
                     logger.info("[大世界] [装置处理] 检测到资源模式，执行标准处理")
                     # 执行一次自律寻敌
                     logger.info("[大世界] [装置处理] 执行自律寻敌")
-                    self.os_auto_search_run(drop=drop)
+                    self.os_auto_search_run(drop=drop, siren_resource=True)
 
                 # 塞壬信息收集装置 / 探测装置产物柱子：点中间已主动点击完成，无需自律
                 elif siren_mode == "collected":

@@ -324,6 +324,7 @@ class TestPendingEvent(unittest.TestCase):
 
                 def search(**kwargs):
                     self.assertEqual(handler._get_pending_event()['phase'], 'followup')
+                    self.assertEqual(kwargs['siren_resource'], mode == 'resource')
 
                 handler.wait_until_walk_stable = walk
                 handler.os_auto_search_run.side_effect = search
@@ -331,6 +332,16 @@ class TestPendingEvent(unittest.TestCase):
                 self.assertEqual(handler.os_auto_search_run.call_count, runs)
                 self.assertIsNone(handler._get_pending_event())
                 self.assertEqual([call.args[0] for call in handler.fleet_set.call_args_list], [2, 1] if mode == 'enemy' else [])
+
+    def test_resource_followup_after_restart_requests_fast_auto_search(self):
+        handler = self.handler('is_scanning_device')
+        state = dict(handler._get_pending_event(), phase='followup', mode='resource', remaining=1)
+        handler.config.cross_set(PENDING_EVENT_PATH, state)
+        handler.is_siren_device_confirmed = False
+        self.assertTrue(handler._resume_pending_event())
+        handler.os_auto_search_run.assert_called_once_with(drop=None, siren_resource=True)
+        handler.map_rescan.assert_not_called()
+        self.assertIsNone(handler._get_pending_event())
 
     def test_interrupted_siren_followup_resumes_remaining_runs_before_scanning_or_new_search(self):
         handler = self.handler('is_scanning_device')

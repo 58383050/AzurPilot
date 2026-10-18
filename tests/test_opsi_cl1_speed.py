@@ -366,6 +366,70 @@ class TestCl1AutoSearchRetry(unittest.TestCase):
         self.assertFalse(self.handler.handle_os_auto_search_map_option())
         self.assertEqual(self.handler.device.click.call_count, 1)
 
+    def test_resource_search_retries_at_half_second_with_shared_off_state_cooldown(self):
+        self.handler._os_auto_search_siren_resource = True
+        self.assertTrue(self.handler.handle_os_auto_search_map_option())
+        for state in (AUTO_SEARCH_OS_MAP_OPTION_OFF_DISABLED, AUTO_SEARCH_OS_MAP_OPTION_OFF):
+            self.handler.state = state
+            self.clock.now += 0.49
+            self.assertFalse(self.handler.handle_os_auto_search_map_option())
+            self.clock.now += 0.02
+            self.assertTrue(self.handler.handle_os_auto_search_map_option())
+        self.assertEqual(self.handler.device.click.call_count, 3)
+
+    def test_resource_search_stops_clicking_as_soon_as_on_is_visible(self):
+        self.handler._os_auto_search_siren_resource = True
+        self.assertTrue(self.handler.handle_os_auto_search_map_option())
+        self.handler.state = AUTO_SEARCH_OS_MAP_OPTION_ON
+        self.clock.now += 0.51
+        with patch.object(AUTO_SEARCH_OS_MAP_OPTION_OFF, 'match_template_color', return_value=True):
+            self.assertFalse(self.handler.handle_os_auto_search_map_option())
+        self.handler.device.click.assert_called_once()
+
+    def test_resource_search_in_other_tasks_waits_for_story_and_map(self):
+        self.handler.config.task.command = 'OpsiExplore'
+        self.handler._os_auto_search_siren_resource = True
+        self.handler.story_present = True
+        self.assertFalse(self.handler.handle_os_auto_search_map_option())
+        self.handler.story_present = False
+        self.handler.in_map = False
+        self.assertFalse(self.handler.handle_os_auto_search_map_option())
+        self.handler.device.click.assert_not_called()
+        self.handler.in_map = True
+        self.assertTrue(self.handler.handle_os_auto_search_map_option())
+        self.clock.now += 0.51
+        self.assertTrue(self.handler.handle_os_auto_search_map_option())
+
+    def test_resource_retry_budget_survives_frames_inside_the_click_cooldown(self):
+        self.handler._os_auto_search_siren_resource = True
+        device = self.use_fake_device()
+        with self.assertRaisesRegex(GameTooManyClickError, '自律寻敌'):
+            for frame in range(231):
+                self.clock.now = 100 + frame * 0.2
+                self.handler.handle_os_auto_search_map_option()
+        self.assertGreater(len(device.history), 60)
+        self.assertLess(self.clock.now, 146)
+
+    def test_resource_scope_is_restored_after_auto_search_returns_or_raises(self):
+        self.handler.config.temporary = Mock(return_value=SimpleNamespace(recover=Mock()))
+        self.handler.config.is_task_enabled = Mock(return_value=False)
+        self.handler.ash_popup_canceled = False
+
+        def search(**kwargs):
+            self.assertTrue(self.handler._os_auto_search_siren_resource)
+            return 2
+
+        self.handler.os_auto_search_daemon = Mock(side_effect=search)
+        self.assertEqual(OSMap.os_auto_search_run(self.handler, siren_resource=True), 2)
+        self.assertFalse(self.handler._os_auto_search_siren_resource)
+        self.assertTrue(self.handler.handle_os_auto_search_map_option())
+        self.clock.now += 0.51
+        self.assertFalse(self.handler.handle_os_auto_search_map_option())
+        self.handler.os_auto_search_daemon.side_effect = RuntimeError('search interrupted')
+        with self.assertRaisesRegex(RuntimeError, 'search interrupted'):
+            OSMap.os_auto_search_run(self.handler, siren_resource=True)
+        self.assertFalse(self.handler._os_auto_search_siren_resource)
+
     def test_resource_pause_keeps_safe_toggle_cooldown(self):
         self.handler.handle_os_auto_search_map_option()
         self.handler.state = AUTO_SEARCH_OS_MAP_OPTION_ON

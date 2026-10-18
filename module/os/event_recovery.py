@@ -289,7 +289,7 @@ class MapEventRecovery:
             if state['mode'] == 'enemy' and fleet > 0:
                 self.fleet_set(fleet)
             while state['remaining']:
-                self.os_auto_search_run(drop=drop)
+                self.os_auto_search_run(drop=drop, siren_resource=state['mode'] == 'resource')
                 if not self.is_in_map():
                     raise GameStuckError('塞壬装置后续自律未返回地图，保留续查记录')
                 state['remaining'] -= 1
