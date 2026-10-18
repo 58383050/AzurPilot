@@ -63,8 +63,6 @@ class MapEventRecovery:
             reason = '事件类型无效'
         elif type(state.get('fleet')) is not int or state['fleet'] not in (1, 2, 3, 4):
             reason = '舰队编号无效'
-        elif type(state.get('recovery_attempted', False)) is not bool:
-            reason = '恢复预算无效'
         elif state.get('target') is not None and (
                 not isinstance(state['target'], (list, tuple)) or len(state['target']) != 2
                 or any(type(n) is not int for n in state['target'])):
@@ -80,7 +78,12 @@ class MapEventRecovery:
             logger.warning(f'[大世界-事件] {reason}，作废旧续查记录')
             self.config.cross_set(PENDING_EVENT_PATH, None)
             return None
-        return dict(state)
+        state = dict(state)
+        if 'recovery_attempted' in state:
+            # 旧标记在恢复开始前写入，不能据此认定强制移动已经完整结束。
+            state.pop('recovery_attempted')
+            self.config.cross_set(PENDING_EVENT_PATH, state)
+        return state
 
     def _event_matches_pending(self, kind, grid):
         """同类事件也按全局格子区分；问号允许在原格子上细化身份。"""
@@ -121,7 +124,6 @@ class MapEventRecovery:
             target=list(target) if target is not None else None,
             kind=kind,
             phase='interact',
-            recovery_attempted=bool(getattr(self, '_event_patrol_attempted', False)),
         ))
         logger.attr('待续查事件', f'{kind}, 全局格子={target}')
 
@@ -347,7 +349,7 @@ class MapEventRecovery:
         return False
 
     def _recover_pending_event(self, drop=None):
-        """已知事件只尝试一遍换队和强制移动，未找到即结束本轮续查。"""
+        """完整走完一遍仍未找到才结束；异常中断保留事件，重启后重新续查。"""
         if getattr(self, '_event_recovery_active', False):
             return False
         state = self._get_pending_event()
@@ -355,11 +357,8 @@ class MapEventRecovery:
             return False
         if not self.is_in_map():
             raise GameStuckError('事件交互未返回海域地图，保留续查记录，禁止在其他页面换队')
-        if state.get('recovery_attempted') or getattr(self, '_event_patrol_attempted', False):
+        if getattr(self, '_event_patrol_attempted', False):
             return self._abandon_pending_event('本次强制移动预算已经使用')
-        # 在任何恢复操作前保存预算，异常重启也不能重新获得一整轮强制移动。
-        state['recovery_attempted'] = True
-        self.config.cross_set(PENDING_EVENT_PATH, state)
         self._event_recovery_active = True
         try:
             if self._goto_pending_event_with_other_fleets(drop=drop):
@@ -383,11 +382,12 @@ class MapEventRecovery:
             # 子任务上下文会恢复运行时覆盖，不把续查专用舰队和开关写入配置。
             self.config.override(OpsiFleet_Fleet=state['fleet'], OpsiGeneral_DoRandomMapEvent=True)
             self._solved_map_event = set()
+            # 持久化记录存在说明上次尚未收尾；中途异常不等于完整走完一遍。
+            self._event_patrol_attempted = False
+            self._event_recovery_exhausted = False
             # 旧坐标只作诊断线索；新实例必须重新识别，不能按旧屏幕位置盲点。
             if state.get('phase') == 'followup':
                 self._complete_siren_event(state)
-            elif state.get('recovery_attempted'):
-                self._abandon_pending_event('重启前已尝试过本次事件恢复')
             else:
                 self.map_rescan(rescan_mode='full')
                 if self._get_pending_event() is not None:

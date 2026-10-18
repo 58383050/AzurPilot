@@ -388,7 +388,7 @@ class TestPendingEvent(unittest.TestCase):
                 handler._execute_fixed_patrol_scan.assert_called_once()
                 self.assertIsNone(handler._get_pending_event())
 
-    def test_interrupted_recovery_does_not_get_another_budget_after_restart(self):
+    def test_interrupted_recovery_retries_the_saved_event_after_restart(self):
         for kind in MAP_EVENT_TYPES:
             with self.subTest(kind=kind):
                 handler = self.handler(kind)
@@ -396,15 +396,32 @@ class TestPendingEvent(unittest.TestCase):
                 with self.assertRaises(GameStuckError):
                     handler._recover_pending_event()
                 saved = handler._get_pending_event()
-                self.assertTrue(saved['recovery_attempted'])
+                self.assertIsNotNone(saved)
                 restarted = self.handler(kind, 'OpsiScheduling')
                 restarted.config.cross_set(PENDING_EVENT_PATH, saved)
                 self.assertTrue(restarted._resume_pending_event())
                 self.assertIsNone(restarted._get_pending_event())
-                restarted.map_rescan.assert_not_called()
-                restarted._goto_pending_event_with_other_fleets.assert_not_called()
-                restarted._execute_fixed_patrol_scan.assert_not_called()
+                restarted.map_rescan.assert_called_once_with(rescan_mode='full')
+                restarted._goto_pending_event_with_other_fleets.assert_called_once()
+                restarted._execute_fixed_patrol_scan.assert_called_once()
                 self.assertEqual(restarted._solved_map_event, set())
+
+    def test_legacy_attempt_marker_cannot_discard_an_interrupted_event(self):
+        handler = self.handler('is_logging_tower')
+        saved = handler._get_pending_event()
+        handler.config.cross_set(PENDING_EVENT_PATH, dict(saved, recovery_attempted=True))
+        handler._event_patrol_attempted = True
+        handler._event_recovery_exhausted = True
+
+        def rescan(**kwargs):
+            self.assertFalse(handler._event_patrol_attempted)
+            self.assertFalse(handler._event_recovery_exhausted)
+            self.assertNotIn('recovery_attempted', handler._get_pending_event())
+
+        handler.map_rescan.side_effect = rescan
+        self.assertTrue(handler._resume_pending_event())
+        handler._execute_fixed_patrol_scan.assert_called_once()
+        self.assertIsNone(handler._get_pending_event())
 
     def test_event_found_inside_regular_patrol_does_not_trigger_another_patrol(self):
         handler = self.handler('is_logging_tower')
@@ -512,7 +529,7 @@ class TestPendingEvent(unittest.TestCase):
 
         def patrol(**kwargs):
             handler._event_patrol_attempted = True
-            self.assertTrue(handler._get_pending_event()['recovery_attempted'])
+            self.assertIsNotNone(handler._get_pending_event())
 
         handler.map_rescan.side_effect = rescan
         handler._execute_fixed_patrol_scan.side_effect = patrol
