@@ -176,9 +176,14 @@ class TestAkashiEntry(unittest.TestCase):
 class View(dict):
     center_loca = (4, 3)
 
+    def select(self, **criteria):
+        return [grid for grid in self.values()
+                if all(getattr(grid, key, False) == value for key, value in criteria.items())]
+
 
 class CameraHarness(MapEventRecovery, OSShop):
     def __init__(self, *, movable=True):
+        self._get_pending_event = Mock(return_value=None)
         self.camera = (4, 3)
         self.target = (1, 7)
         self.view = View({self.target: make_grid((270, 636, 345, 699))})
@@ -238,6 +243,8 @@ class RecoveryHarness(MapEventRecovery):
         self._goto_pending_event_with_other_fleets = Mock(return_value=False)
         self._execute_fixed_patrol_scan = Mock()
         self.map_rescan = Mock()
+        # 旧恢复预算测试不承担新截图消失确认；该检查由专用截图测试覆盖。
+        self._cancel_missing_scanning_event = Mock(return_value=False)
         self.camera = (4, 3)
         self.view = View()
 
@@ -463,7 +470,7 @@ class TestRecoveryInitialization(unittest.TestCase):
         handler.map_rescan.assert_called_once()
         handler.handle_after_auto_search.assert_called_once()
 
-    def test_resume_precedes_maintenance_and_new_auto_search_for_all_entrypoints(self):
+    def test_entry_auto_resume_and_scan_precede_maintenance_for_all_entrypoints(self):
         for task in ('OpsiHazard1Leveling', 'OpsiScheduling', 'OpsiPreventActionPointOverflow', 'OpsiDaily'):
             with self.subTest(task=task):
                 handler = OSMap.__new__(OSMap)
@@ -472,14 +479,17 @@ class TestRecoveryInitialization(unittest.TestCase):
                 handler.config.task = Function({'Scheduler': {'Command': task}})
                 handler.zone = helper.zone
                 calls = []
-                for name in ('zone_init', '_resume_pending_event', 'hp_reset', 'handle_after_auto_search',
+                for name in ('zone_init', 'run_auto_search', '_resume_pending_event', '_scan_current_sea_on_entry',
+                             'hp_reset', 'handle_after_auto_search',
                              'handle_current_fleet_resolve', 'run_first_auto_search'):
                     setattr(handler, name, Mock(side_effect=lambda *args, _name=name, **kwargs: calls.append(_name)))
+                handler._get_pending_event = Mock(return_value=None)
                 handler.is_in_map = Mock(return_value=True)
                 handler.is_in_special_zone = Mock(return_value=False)
                 handler.is_smart_scheduling_enabled = Mock(return_value=True)
                 OSMap.os_init(handler)
-                self.assertEqual(calls[:3], ['zone_init', '_resume_pending_event', 'hp_reset'])
+                self.assertEqual(calls[:5], ['zone_init', 'run_auto_search', '_resume_pending_event',
+                                            '_scan_current_sea_on_entry', 'hp_reset'])
                 if 'run_first_auto_search' in calls:
                     self.assertLess(calls.index('_resume_pending_event'), calls.index('run_first_auto_search'))
 

@@ -637,6 +637,13 @@ class OSFleet(OSCamera, Combat, Fleet, OSAsh):
                 if self.is_in_map():
                     self.enemy_searching_color_initial()
 
+            if (fast_farming and allow_event_finish and event_interacted and self.is_in_map()
+                    and getattr(self, 'is_siren_device_confirmed', False)
+                    and getattr(self, 'siren_device_mode', None) in ('resource', 'enemy')):
+                # 已提交探测选项，交回后续自律，不能继续按旧机关位置移动。
+                finish_without_stability = True
+                break
+
             # 只在最终领奖/商店退出之后的新画面直接收尾；选项提交、普通移动和恢复仍等定位。
             if (fast_farming and allow_event_finish and completed_event and self.is_in_map()
                     and self.match_template_color(STRATEGIC_SEARCH_MAP_OPTION_OFF, offset=(20, 20))):

@@ -809,6 +809,10 @@ class InfoHandler(ModuleBase):
                             select = options[0]
                     
                     self.device.click(select)
+                    if is_siren_device:
+                        followup = getattr(self, '_record_siren_followup', None)
+                        if followup is not None:
+                            followup(getattr(self, 'siren_device_mode', None))
                     # 选项按钮名按「第几个/共几个」生成，不同剧情段共用同一个名字，
                     # 装置 / 柱子较多的海域会被防连点机制误判为「两个按钮交替点击」
                     # 而报 GameTooManyClickError。因此剧情点击后清空点击记录，

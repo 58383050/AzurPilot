@@ -180,7 +180,7 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
         self.zone_init()
 
         # 重启后先处理原海域的已知事件，修船、换图和新自律都可能刷新现场。
-        self._resume_pending_event()
+        self._prepare_current_sea_entry()
 
         # self.map_init()
         self.hp_reset()
@@ -200,7 +200,10 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
         ) or 22
         overflow_target_task = self._get_prevent_action_point_overflow_target_task()
 
-        if self.config.task.command == "OpsiExploreCleanup":
+        if getattr(self, "_entry_initial_auto_search_done", False):
+            logger.info("[大世界-入口] 已执行首次自律寻敌，继续原任务")
+            self._smart_scheduling_first_auto_search_pending = False
+        elif self.config.task.command == "OpsiExploreCleanup":
             logger.info("独立事件补扫任务，跳过初始化自律寻敌")
         elif (
             (
@@ -1914,7 +1917,8 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
         try:
             self.update()
         except MapDetectionError:
-            if getattr(self, "_opsi_meowfficer_cleanup", False):
+            if (getattr(self, "_opsi_meowfficer_cleanup", False)
+                    or getattr(self, "_entry_event_scan_active", False)):
                 raise
             # 地图可能已清理完毕，单应性变换无法检测到有效格子
             logger.warning(
@@ -1969,7 +1973,8 @@ class OSMap(MapEventRecovery, OSFleet, Map, GlobeCamera, StorageHandler, Strateg
                 self.fleet_set(self.config.OpsiFleet_Fleet)
             else:
                 self.fleet_set(self.get_second_fleet())
-            if (not self.is_in_task_explore and self._solved_map_event
+            if (not getattr(self, "_entry_event_scan_active", False)
+                    and not self.is_in_task_explore and self._solved_map_event
                     and (not getattr(self, '_event_recovery_active', False)
                          or self._get_pending_event() is None)):
                 logger.info("[大世界-扫描] 解决了地图事件且不在大世界探索中，停止重新扫描")
