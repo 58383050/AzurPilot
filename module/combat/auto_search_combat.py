@@ -90,6 +90,7 @@ class AutoSearchCombat(MapOperation, Combat, CampaignStatus):
         if not self._restart_resume_click_timer.reached():
             return False
         if self.is_combat_loading() or self.is_combat_executing():
+            self._auto_search_off_frame = None
             return False
         if not self.match_template_color(AUTO_SEARCH_MAP_OPTION_OFF,
                                          offset=self._auto_search_offset, threshold=10):
