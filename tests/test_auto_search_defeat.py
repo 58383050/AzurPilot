@@ -281,6 +281,35 @@ class AutoSearchDefeatTests(unittest.TestCase):
             self.assertTrue(campaign.handle_auto_search_map_option())
         self.assertEqual(replay.clicks.count(AUTO_SEARCH_MAP_OPTION_OFF.name), 1)
 
+    def test_resume_guard_drops_confirmation_after_unknown_frame(self):
+        """空白过渡帧打断连续确认，之后必须重新取得两张 OFF 截图。"""
+        replay = ScreenReplay([
+            screen(AUTO_SEARCH_MAP_OPTION_OFF, FLEET_NUM_2), screen(),
+            screen(AUTO_SEARCH_MAP_OPTION_OFF, FLEET_NUM_2),
+            screen(AUTO_SEARCH_MAP_OPTION_OFF, FLEET_NUM_2),
+        ])
+        campaign = replay.make_campaign()
+        with patch('module.base.timer.time', side_effect=lambda: replay.time):
+            campaign.prepare_auto_search_recovery('map')
+            campaign.auto_search_watch_fleet = Mock()
+            campaign._auto_search_fleet_confirmed = True
+            campaign.fleet_show_index = 2
+            replay.time += 5
+            self.assertFalse(campaign.handle_auto_search_map_option())
+            self.assertIsNotNone(campaign._auto_search_off_frame)
+            replay.screenshot()
+            self.assertFalse(campaign.handle_auto_search_map_option())
+            self.assertIsNone(campaign._auto_search_off_frame)
+            replay.screenshot()
+            self.assertFalse(campaign.handle_auto_search_map_option())
+            self.assertEqual(replay.clicks, [])
+            # 同一张截图多次检查不算新的确认。
+            self.assertFalse(campaign.handle_auto_search_map_option())
+            replay.screenshot()
+            self.assertTrue(campaign.handle_auto_search_map_option())
+        self.assertEqual(replay.click_frames, [(3, AUTO_SEARCH_MAP_OPTION_OFF.name)])
+        campaign.emotion.check_fleet.assert_called_once_with(2, after_restart=True)
+
     def test_resume_entry_drops_confirmation_from_previous_flow(self):
         """续接入口复位重启前的确认，新流程仍需两帧才点击。"""
         replay = ScreenReplay([screen(AUTO_SEARCH_MAP_OPTION_OFF, FLEET_NUM_2)])

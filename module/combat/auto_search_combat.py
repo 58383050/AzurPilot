@@ -93,6 +93,7 @@ class AutoSearchCombat(MapOperation, Combat, CampaignStatus):
             return False
         if not self.match_template_color(AUTO_SEARCH_MAP_OPTION_OFF,
                                          offset=self._auto_search_offset, threshold=10):
+            self._auto_search_off_frame = None
             return False
         if not self._restart_emotion_checked:
             self.auto_search_watch_fleet()
